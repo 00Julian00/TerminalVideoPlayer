@@ -53,52 +53,15 @@ class FrameBuffer:
         """
         overwritten_positions: list[Position] = []
 
-        for pixel in pixels:
-            self.grow_to_fit(pixel.position)
+        self.grow_to_fit(pixels[-1].position)
 
+        for pixel in pixels:
             if self._buffer[pixel.position.y][pixel.position.x] is not None:
                 overwritten_positions.append(pixel.position)
 
             self._buffer[pixel.position.y][pixel.position.x] = pixel
 
         return overwritten_positions
-
-    def analyze_efficiency(self) -> None:
-        """
-        Analyzes the buffer's contents for rendering efficiency metrics like
-        pixel jumps and color changes, and logs the results.
-        """
-        all_pixels: list[Pixel] = []
-        for row in self._buffer:
-            for pixel in row:
-                if pixel is not None:
-                    all_pixels.append(pixel)
-
-        if not all_pixels:
-            logging.info("Buffer is empty, nothing to analyze.")
-            return
-
-        # Sort pixels by position to calculate jumps and color changes logically
-        sorted_pixels = sorted(all_pixels, key=lambda p: (p.position.y, p.position.x))
-
-        jumps = 0
-        color_changes = 0
-        last_position = sorted_pixels[0].position
-        last_color = sorted_pixels[0].color
-
-        for pixel in sorted_pixels[1:]:
-            # Check for jumps (not contiguous on the same line)
-            if not (pixel.position.y == last_position.y and pixel.position.x == last_position.x + 1):
-                jumps += 1
-            
-            # Check for color changes
-            if pixel.color != last_color:
-                color_changes += 1
-            
-            last_position = pixel.position
-            last_color = pixel.color
-
-        logging.info(f"Efficiency Analysis: Total Pixels: {len(sorted_pixels)}, Jumps: {jumps}, Color Changes: {color_changes}")
 
     def grow_to_fit(self, size: Size | Position) -> None:
         """
@@ -114,14 +77,16 @@ class FrameBuffer:
             width = size.width + 1
             height = size.height + 1
 
-        while len(self._buffer) < height:
-            self._buffer.append([])
+        # Grow height if needed
+        if height > len(self._buffer):
+            self._buffer.extend([[] for _ in range(height - len(self._buffer))])
 
+        # Grow width for each row (only if needed)
         for row in self._buffer:
-            while len(row) < width:
-                row.append(None)
+            if width > len(row):
+                row.extend([None] * (width - len(row)))
 
-    def get_difference(self, other: 'FrameBuffer', terminal: Terminal) -> str:
+    def get_difference(self, other: 'FrameBuffer', terminal: Terminal, color_threshold: float = 0.05, render_outside_bounds: bool = False) -> str:
         """
         Returns a single string containing all terminal sequences to update the
         display from the other buffer to this one.
@@ -132,25 +97,45 @@ class FrameBuffer:
         term_width = terminal.width
         term_height = terminal.height
 
+        # Pre-compute squared threshold to avoid sqrt calculations
+        threshold_squared = color_threshold * color_threshold
+
         # Iterate over the taller buffer. If one buffer is taller, the data of
         # the extra pixels are all considered changed.
         max_height = max(len(self._buffer), len(other._buffer))
         for y in range(max_height):
-            if y >= term_height:
+            if y >= term_height and not render_outside_bounds:
                 continue  # Skip rows outside terminal bounds
             self_row = self._buffer[y] if y < len(self._buffer) else []
             other_row = other._buffer[y] if y < len(other._buffer) else []
             
             max_width = max(len(self_row), len(other_row))
             for x in range(max_width):
-                if x >= term_width:
+                if x >= term_width and not render_outside_bounds:
                     continue  # Skip columns outside terminal bounds
                 self_pixel = self_row[x] if x < len(self_row) else None
                 other_pixel = other_row[x] if x < len(other_row) else None
 
-                if self_pixel != other_pixel:
-                    # If a pixel exists in `self` but not `other`, we should draw it.
-                    # If a pixel exists in `other` but not `self`, we should clear it (draw a space).
+                # Check if pixel needs updating
+                needs_update = False
+
+                if (self_pixel is None) != (other_pixel is None):
+                    # One exists, the other doesn't (XOR) - definitely update
+                    needs_update = True
+                elif self_pixel is not None and other_pixel is not None:
+                    # Both exist, check if they differ
+                    if self_pixel.char != other_pixel.char:
+                        needs_update = True
+                    else:
+                        # Inline color comparison (no sqrt, no function call)
+                        r1, g1, b1 = self_pixel.color.to_tuple_rgb()
+                        r2, g2, b2 = other_pixel.color.to_tuple_rgb()
+                        distance_squared = (r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2
+                        if distance_squared >= threshold_squared:
+                            needs_update = True
+                # If both are None, needs_update stays False
+
+                if needs_update:
                     pixel_to_draw = self_pixel if self_pixel is not None else Pixel(' ', Color(0, 0, 0), Position(x, y))
                     diff_buffer.append(((x, y), pixel_to_draw))
 
@@ -218,3 +203,14 @@ class Element(abc.ABC):
         Called when a new frame is being rendered.
         """
         pass
+
+@dataclass
+class ProcessedVideo:
+    framerate: int
+    size: int
+    is_in_ascii: bool
+    frames: list[str]
+
+    def consume_frames(self) -> iter:
+        for frame in self.frames:
+            yield frame

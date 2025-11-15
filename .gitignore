@@ -123,6 +123,3 @@ dmypy.json
 .pyre/
 
 notes.txt
-
-# In development
-video_compiler.py

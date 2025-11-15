@@ -45,6 +45,26 @@ def get_framerate(file_path: str) -> int:
 
     return int(fps)
 
+def get_frame_amount(file_path: str) -> int:
+    """
+    Gets the total number of frames in a video.
+
+    Args:
+        file_path (str): The path to the video file.
+
+    Returns:
+        int: The total number of frames in the video.
+    """
+    cap = cv2.VideoCapture(file_path)
+
+    if not cap.isOpened():
+        raise ValueError(f"Error: Could not open video file at {file_path}")
+
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+
+    return int(frame_count)
+
 def process_video(file_path: str):
     generator = stream_video_from_disk(file_path)
     for frame in generator:

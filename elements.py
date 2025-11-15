@@ -91,7 +91,7 @@ class element_COORDINATES(Element):
 @dataclass
 class element_FPS(Element):
     """
-    An element that displays the rate at which the terminal is beeing updated.
+    An element that displays the rate at which the terminal is being updated.
     """
     color: Color = field(default_factory=lambda: Color(1.0, 1.0, 1.0))
 

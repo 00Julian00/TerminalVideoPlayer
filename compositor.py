@@ -12,6 +12,4 @@ def construct_frame_buffer(elements: list[data.Element]) -> data.FrameBuffer:
         element.on_new_frame()
         buffer.write(element.data)
 
-    buffer.analyze_efficiency()
-
     return buffer
