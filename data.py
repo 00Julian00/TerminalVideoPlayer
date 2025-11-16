@@ -205,6 +205,15 @@ class Element(abc.ABC):
         pass
 
 @dataclass
+class DaemonMessage:
+    """Message sent from main application to daemon terminal"""
+    frames_shown: int
+    total_frames: int
+    idle_time_per_frame: float
+    data_throughput: float
+    playback_speed: float
+
+@dataclass
 class ProcessedVideo:
     framerate: int
     size: int

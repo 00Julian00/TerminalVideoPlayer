@@ -5,6 +5,8 @@ import argparse
 import logging
 import cProfile
 import pickle
+import socket
+import json
 
 from blessed import Terminal
 
@@ -18,6 +20,30 @@ import video_processing
 terminal = Terminal()
 
 active_elements: list[elements.Element] = []
+
+# Socket for sending daemon messages
+daemon_sock = None
+daemon_port = 9999
+daemon_host = '127.0.0.1'
+
+def send_daemon_message(daemon_msg: data.DaemonMessage):
+    """Send a daemon message to the daemon terminal"""
+    global daemon_sock
+    if daemon_sock is None:
+        return
+    
+    try:
+        msg_dict = {
+            'frames_shown': daemon_msg.frames_shown,
+            'total_frames': daemon_msg.total_frames,
+            'idle_time_per_frame': daemon_msg.idle_time_per_frame,
+            'data_throughput': daemon_msg.data_throughput,
+            'playback_speed': daemon_msg.playback_speed
+        }
+        json_msg = json.dumps(msg_dict)
+        daemon_sock.sendto(json_msg.encode('utf-8'), (daemon_host, daemon_port))
+    except Exception:
+        pass  # Silently ignore if daemon is not available
 
 async def watch_terminal_dimensions(should_refresh: bool = True):
     delay = 1.0 / 30
@@ -36,7 +62,7 @@ async def watch_terminal_dimensions(should_refresh: bool = True):
                 element.on_terminal_size_change(data.Size(width, height))
 
 async def _play_video(file_path: str, ascii_mode: bool = False, size: int = 32, debug_mode: bool = False):
-    global terminal
+    global terminal, daemon_sock
 
     is_preprocessed = file_path.lower().endswith((".pickle", ".pkl"))
 
@@ -60,6 +86,8 @@ async def _play_video(file_path: str, ascii_mode: bool = False, size: int = 32, 
     try:
         if debug_mode:
             logger.start_external_log()
+            # Initialize daemon socket for sending stats
+            daemon_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         else:
             logging.getLogger().setLevel(logging.ERROR)
 
@@ -89,24 +117,64 @@ async def _play_video(file_path: str, ascii_mode: bool = False, size: int = 32, 
 
         # Main render loop
         frame_time = 1.0 / framerate  # Target: 33.33ms per frame
+        
+        # Stats tracking
+        frame_count = 0
+        total_frames = len(processed_video.frames) if is_preprocessed else video_processing.get_frame_amount(file_path)  # For preprocessed videos
+        last_sleep_time = 0.0
+        video_ended = False
 
         # Main render loop
         while True:
             frame_start = time.time()
             
+            # Get the output string from renderer
+            output_string = ""
             if not is_preprocessed:
-                renderer.render(active_elements, terminal)
+                output_string = renderer.render(active_elements, terminal)
             else:
                 next_frame = next(frame_generator, None)
                 if next_frame is None:  # Video finished
+                    video_ended = True
                     break
-                terminal_api.print_at(terminal, (0, 0), next_frame)
+                output_string = next_frame
+            
+            # Print the output to terminal
+            if output_string:
+                terminal_api.print_at(terminal, (0, 0), output_string)
+            
+            # Measure bytes sent (data throughput per frame in KB)
+            bytes_sent = len(output_string.encode('utf-8'))
+            data_throughput_per_frame = bytes_sent / 1024  # KB per frame
             
             # Calculate how long to sleep
             elapsed = time.time() - frame_start
             sleep_time = max(0, frame_time - elapsed)
+            
+            # Calculate playback speed (current fps / video framerate)
+            actual_frame_time = elapsed + sleep_time
+            actual_fps = 1.0 / actual_frame_time if actual_frame_time > 0 else 0.0
+            playback_speed = actual_fps / framerate if framerate > 0 else 0.0
+            
+            # Update stats only if video hasn't ended
+            if not video_ended:
+                frame_count += 1
+            
+            # Send daemon message if in debug mode
+            if debug_mode and daemon_sock:
+                daemon_msg = data.DaemonMessage(
+                    frames_shown=frame_count,
+                    total_frames=total_frames,
+                    idle_time_per_frame=last_sleep_time,  # Sleep time from last round
+                    data_throughput=data_throughput_per_frame,  # KB per frame
+                    playback_speed=playback_speed
+                )
+                send_daemon_message(daemon_msg)
 
             logging.info(f"Frame time: {elapsed:.4f}s, sleeping for {sleep_time:.4f}s")
+            
+            # Store sleep time for next iteration
+            last_sleep_time = sleep_time
             
             await asyncio.sleep(sleep_time)
 
