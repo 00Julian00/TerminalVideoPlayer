@@ -7,10 +7,11 @@ import pickle
 
 from blessed import Terminal
 
+import data
 import terminal_api
 from processing_pipeline import VideoProcessor
 import daemon_helper
-from video_processing import get_framerate, get_frame_amount
+from video_processing import get_framerate
 from data import ProcessedVideo
 # from audio_player import prepare_audio, AudioPlayer
 
@@ -26,20 +27,21 @@ async def _play_video(file_path: str, ascii_mode: bool = False, size: int = 32, 
     if file_path.endswith('.pkl') or file_path.endswith('.pickle'):
         with open(file_path, 'rb') as f:
             processed: ProcessedVideo = pickle.load(f)
-
-        frame_generator = processed.consume_frames(terminal)
-        frame_rate = processed.framerate
-        frame_amount = len(processed.frames)
     else:
-        frame_generator = processor.process_video(file_path, ascii_mode, size)
-        frame_rate = get_framerate(file_path)
-        frame_amount = get_frame_amount(file_path)
+        frame_generator = processor.process_video(file_path, ascii_mode, size, 4, False)
+        processed = data.ProcessedVideo(
+            framerate=get_framerate(file_path),
+            size=size,
+            is_in_ascii=ascii_mode,
+            frames=[frame[0] for frame in frame_generator]
+        )
+
+    frame_generator = processed.consume_frames(terminal)
+
+    frame_rate = processed.framerate
+    frame_amount = len(processed.frames)
 
     frame_time = 1.0 / frame_rate
-
-    # processed = ProcessedVideo(frame_rate, size, ascii_mode, [frame[0] for frame in frame_generator])
-
-    # frame_generator = processed.consume_frames(terminal)
 
     # audio_player = prepare_audio(file_path, frame_rate)
     # audio_player.start()  # Start the audio stream

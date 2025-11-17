@@ -67,7 +67,7 @@ def process_video(file_path: str, ascii_mode: bool = False, size: int = 32):
 
     total_frames = video_processing.get_frame_amount(file_path)
     
-    frame_generator = processor.process_video(file_path, ascii_mode, size, batch_size=32)
+    frame_generator = processor.process_video(file_path, ascii_mode, size, batch_size=32, yield_progress=True)
     frames = []
 
     # Use hidden cursor for cleaner display

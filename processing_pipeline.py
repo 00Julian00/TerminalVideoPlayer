@@ -4,7 +4,7 @@ import threading
 
 from data import Size, FrameBuffer, DiffBuffer
 from video_processing import get_aspect_ratio, stream_video_from_disk
-from pixel_matrix import img_to_pixel_matrix, img_to_pixel_matrix_batched
+from pixel_matrix import img_to_pixel_matrix_batched
 from constants import WIDTH_COMPENSATION
 from diff_to_ansi import diff_buffer_to_ANSI
 
@@ -27,7 +27,7 @@ class VideoProcessor:
         thread = threading.Thread(target=produce_frames)
         thread.start()
 
-    def process_video(self, file_path: str, as_ascii: bool = False, size: int = 32, batch_size: int = 1) -> iter:
+    def process_video(self, file_path: str, as_ascii: bool = False, size: int = 32, batch_size: int = 1, yield_progress: bool = False) -> iter:
         aspect_ratio = get_aspect_ratio(file_path)
         last_buffer = FrameBuffer()
 
@@ -59,7 +59,8 @@ class VideoProcessor:
 
             all_matrices.extend(matrices)
 
-            yield len(all_matrices)
+            if yield_progress:
+                yield len(all_matrices)
 
         for matrix in all_matrices:
             buffer = FrameBuffer()
