@@ -12,13 +12,12 @@ from processing_pipeline import VideoProcessor
 _start_time = None
 _progress_line = None
 
-def progress_bar(current, total, terminal, bar_length=40):
+def progress_bar(name, current, total, terminal, bar_length=40):
     """Draw and update a progress bar with frame counter and timer"""
     global _start_time, _progress_line
     
     # Initialize on first call
-    if _start_time is None:
-        _start_time = time.time()
+    if _progress_line is None:
         _progress_line = terminal.get_location()[0]  # Save current line
         print()  # Create a line for the progress bar
     
@@ -47,31 +46,41 @@ def progress_bar(current, total, terminal, bar_length=40):
         remaining_display = "--:--"
     
     # Build the progress bar (with fixed width for numbers)
-    display = f"Processed frames: {current:4d} / {total:4d} [{bar}] {percent_display:6s} | Time: {time_display} | Remaining Est.: {remaining_display}"
+    display = f"{name}: {current:4d} / {total:4d} [{bar}] {percent_display:6s} | Time: {time_display} | Remaining Est.: {remaining_display}"
     
     # Save cursor, move to progress line, update, restore cursor
     print(terminal.save + terminal.move_x(0) + terminal.clear_eol + display + terminal.restore, end='', flush=True)
 
 def reset_progress_bar():
     """Reset the progress bar state"""
-    global _start_time, _progress_line
-    _start_time = None
+    global _progress_line
     _progress_line = None
 
 def process_video(file_path: str, ascii_mode: bool = False, size: int = 32):
+    global _start_time
+    
     processor = VideoProcessor()
     terminal = Terminal()
 
+    _start_time = time.time()
+    reset_progress_bar_flag = True
+
     total_frames = video_processing.get_frame_amount(file_path)
     
-    frame_generator = processor.process_video(file_path, ascii_mode, size)
+    frame_generator = processor.process_video(file_path, ascii_mode, size, batch_size=32)
     frames = []
 
     # Use hidden cursor for cleaner display
     with terminal.hidden_cursor():
         for frame in frame_generator:
+            if type(frame) is int:
+                progress_bar("Generating character matrices", frame, total_frames, terminal)
+                continue
+            elif reset_progress_bar_flag:
+                reset_progress_bar_flag = False
+
             frames.append(frame[0])
-            progress_bar(len(frames), total_frames, terminal)
+            progress_bar("Calculating diff buffers", len(frames), total_frames, terminal)
 
     processed_video = data.ProcessedVideo(
         framerate=video_processing.get_framerate(file_path),
@@ -82,12 +91,9 @@ def process_video(file_path: str, ascii_mode: bool = False, size: int = 32):
 
     # Calculate total time before resetting
     elapsed_time = time.time() - _start_time if _start_time else 0
-    
-    # Reset progress bar state
-    reset_progress_bar()
 
     # Move to new line after progress bar
-    print()
+    print("\nSaving processed video...")
 
     target_location = os.path.dirname(file_path)
     output_path = os.path.join(target_location, "processed_video.pkl")
