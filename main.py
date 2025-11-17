@@ -28,7 +28,7 @@ async def _play_video(file_path: str, ascii_mode: bool = False, size: int = 32, 
         with open(file_path, 'rb') as f:
             processed: ProcessedVideo = pickle.load(f)
     else:
-        frame_generator = processor.process_video(file_path, ascii_mode, size, 4, False)
+        frame_generator = processor.process_video(file_path, ascii_mode, size, float('inf'), False)
         processed = data.ProcessedVideo(
             framerate=get_framerate(file_path),
             size=size,

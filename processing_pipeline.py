@@ -5,7 +5,7 @@ import threading
 from data import Size, FrameBuffer, DiffBuffer
 from video_processing import get_aspect_ratio, stream_video_from_disk
 from pixel_matrix import img_to_pixel_matrix_batched
-from constants import WIDTH_COMPENSATION
+from constants import ASCII_MODE_COLOR_OFFSET_THRESHOLD, NORMAL_MODE_COLOR_OFFSET_THRESHOLD, WIDTH_COMPENSATION
 from diff_to_ansi import diff_buffer_to_ANSI
 
 class VideoProcessor:
@@ -67,7 +67,9 @@ class VideoProcessor:
             
             buffer.write(matrix)
 
-            output = buffer.get_difference(last_buffer, self.terminal) if self.terminal.width == self.term_width and self.terminal.height == self.term_height else buffer.get_difference(FrameBuffer(), self.terminal)
+            color_threshold = NORMAL_MODE_COLOR_OFFSET_THRESHOLD if not as_ascii else ASCII_MODE_COLOR_OFFSET_THRESHOLD
+
+            output = buffer.get_difference(last_buffer, self.terminal, color_threshold=color_threshold) if self.terminal.width == self.term_width and self.terminal.height == self.term_height else buffer.get_difference(FrameBuffer(), self.terminal)
 
             size_changed = self.terminal.width != self.term_width or self.terminal.height != self.term_height
 
