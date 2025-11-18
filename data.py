@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-import abc
 
 from blessed import Terminal
 
@@ -36,6 +35,7 @@ class Pixel:
     char: str
     color: Color
     position: Position
+    color_background: Color | None = None
 
     @classmethod
     def string_to_pixels(cls, s: str, color: Color, position: Position) -> list['Pixel']:

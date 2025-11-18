@@ -1,8 +1,10 @@
 def compute_diff_buffer(self_buffer, other_buffer, term_width, term_height, 
                         color_threshold=0.05, render_outside_bounds=False):
     """
-    Same logic as your Python version, Cython will make it fast
+    Compute which pixels need to be updated between two frame buffers.
     """
+    from data import Pixel, Color, Position
+
     diff_buffer = []
     threshold_squared = color_threshold * color_threshold
     max_height = max(len(self_buffer), len(other_buffer))
@@ -35,9 +37,15 @@ def compute_diff_buffer(self_buffer, other_buffer, term_width, term_height,
                     distance_squared = (r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2
                     if distance_squared >= threshold_squared:
                         needs_update = True
+
+                    if self_pixel.color_background is not None or other_pixel.color_background is not None:
+                        r1b, g1b, b1b = self_pixel.color_background.to_tuple_rgb()
+                        r2b, g2b, b2b = other_pixel.color_background.to_tuple_rgb()
+                        distance_squared_bg = (r1b - r2b)**2 + (g1b - g2b)**2 + (b1b - b2b)**2
+                        if distance_squared_bg >= threshold_squared:
+                            needs_update = True
             
             if needs_update:
-                from data import Pixel, Color, Position
                 pixel_to_draw = self_pixel if self_pixel is not None else Pixel(' ', Color(0, 0, 0), Position(x, y))
                 diff_buffer.append((Position(x, y), pixel_to_draw))
     

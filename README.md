@@ -16,7 +16,7 @@ python main.py /path/to/your/video.mp4
 
 ### Options
 
-- **ASCII Mode**: Render the video using ASCII characters instead of colored blocks.
+- **ASCII Mode**: Render the video using ASCII characters instead of colored blocks. Note that due to technical reasons, the ascii mode has half the resolution of the normal mode at the same size.
   ```bash
   python main.py /path/to/your/video.mp4 --ascii
   ```

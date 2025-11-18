@@ -15,7 +15,7 @@ _progress_line = None
 def progress_bar(name, current, total, terminal, bar_length=40):
     """Draw and update a progress bar with frame counter and timer"""
     global _start_time, _progress_line
-    
+
     # Initialize on first call
     if _progress_line is None:
         _progress_line = terminal.get_location()[0]  # Save current line
@@ -67,20 +67,15 @@ def process_video(file_path: str, ascii_mode: bool = False, size: int = 32):
 
     total_frames = video_processing.get_frame_amount(file_path)
     
-    frame_generator = processor.process_video(file_path, ascii_mode, size, batch_size=32, yield_progress=True)
+    frame_generator = processor.process_video(file_path, ascii_mode, size, batch_size=32)
     frames = []
 
     # Use hidden cursor for cleaner display
     with terminal.hidden_cursor():
         for frame in frame_generator:
-            if type(frame) is int:
-                progress_bar("Generating character matrices", frame, total_frames, terminal)
-                continue
-            elif reset_progress_bar_flag:
-                reset_progress_bar_flag = False
 
             frames.append(frame[0])
-            progress_bar("Calculating diff buffers", len(frames), total_frames, terminal)
+            progress_bar("Processing frames", len(frames), total_frames, terminal)
 
     processed_video = data.ProcessedVideo(
         framerate=video_processing.get_framerate(file_path),

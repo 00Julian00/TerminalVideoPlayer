@@ -24,11 +24,14 @@ processor = VideoProcessor()
 async def _play_video(file_path: str, ascii_mode: bool = False, size: int = 32, debug_mode: bool = False):
     frame_idx = 0
 
+    if not ascii_mode:
+        size *= 2 # Keep scaling consistent between ASCII and normal mode
+
     if file_path.endswith('.pkl') or file_path.endswith('.pickle'):
         with open(file_path, 'rb') as f:
             processed: ProcessedVideo = pickle.load(f)
     else:
-        frame_generator = processor.process_video(file_path, ascii_mode, size, float('inf'), False)
+        frame_generator = processor.process_video(file_path, ascii_mode, size, 1024)
         processed = data.ProcessedVideo(
             framerate=get_framerate(file_path),
             size=size,

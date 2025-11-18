@@ -1,6 +1,6 @@
 from blessed import Terminal
 from data import DiffBuffer
-from terminal_api import get_move_sequence, get_rgb_sequence
+from terminal_api import get_move_sequence, get_rgb_sequence, get_rgb_background_sequence
 
 def diff_buffer_to_ANSI(diff_buffer: DiffBuffer, terminal: Terminal) -> str:
     if not diff_buffer.buffer:
@@ -19,6 +19,7 @@ def diff_buffer_to_ANSI(diff_buffer: DiffBuffer, terminal: Terminal) -> str:
     for position, pixel in diff_buffer.buffer:
         x, y = position.x, position.y
         final_color = pixel.color.to_tuple_rgb()
+        final_background_color = pixel.color_background.to_tuple_rgb() if pixel.color_background else None
 
         # If we need to move the cursor
         if (x, y) != current_position:
@@ -27,9 +28,14 @@ def diff_buffer_to_ANSI(diff_buffer: DiffBuffer, terminal: Terminal) -> str:
                 output_parts.append(get_move_sequence((x, y)))
         
         # Change color if different from the last one
-        if final_color != current_color:
+        if final_color != current_color or (final_background_color is not None and final_background_color != current_color):
             output_parts.append(get_rgb_sequence(int(final_color[0] * 255), int(final_color[1] * 255), int(final_color[2] * 255)))
+
+            if final_background_color is not None:
+                output_parts.append(get_rgb_background_sequence(int(final_background_color[0] * 255), int(final_background_color[1] * 255), int(final_background_color[2] * 255)))
+            
             current_color = final_color
+            current_background_color = final_background_color
 
         output_parts.append(pixel.char)
         current_position = (x, y)

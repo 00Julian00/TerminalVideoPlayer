@@ -50,7 +50,6 @@ def get_move_sequence(target: tuple[int, int]) -> str:
     Returns:
         The terminal escape sequence with 1-indexed coordinates.
     """
-    # Terminal escape sequences use 1-indexed coordinates, so add 1 to both x and y
     return f'\033[{target[1] + 1};{target[0] + 1}H'
 
 def get_rgb_sequence(r: int, g: int, b: int) -> str:
@@ -65,3 +64,16 @@ def get_rgb_sequence(r: int, g: int, b: int) -> str:
         The terminal escape sequence for the specified RGB color.
     """
     return f'\x1b[38;2;{r};{g};{b}m'
+
+def get_rgb_background_sequence(r: int, g: int, b: int) -> str:
+    """Returns the terminal escape sequence to set the background color to the specified RGB value.
+    
+    Args:
+        r: Red component (0-255).
+        g: Green component (0-255).
+        b: Blue component (0-255).
+    
+    Returns:
+        The terminal escape sequence for the specified RGB background color.
+    """
+    return f'\x1b[48;2;{r};{g};{b}m'

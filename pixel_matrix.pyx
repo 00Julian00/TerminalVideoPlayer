@@ -97,26 +97,41 @@ def img_to_pixel_matrix(img: Image.Image, size: data.Size, render_as_ascii: bool
     if not chars or not percentages:
         change_font()
 
-    img, img_gry = image_tools.resize_img(img, int(size.width * aspect_ratio), size.height)
+    # Resize the image
+    resized_img = img.resize((int(size.width * aspect_ratio), size.height))
 
-    matrix = image_tools.get_normalized_brightness_matrix(img_gry)
-
-    color_matrix = image_tools.get_rgb_matrix(img)
+    color_matrix = image_tools.get_rgb_matrix(resized_img)
 
     buffer = []
 
-    for y, row in enumerate(matrix):
-        for x, val in enumerate(row):
-            char = get_closest_char(val, percentages, chars) if render_as_ascii else ''
-            r, g, b = color_matrix[y][x]
-            
+    pixel = None
+    true_y = 0
+    for y, row in enumerate(color_matrix):
+        if y == len(color_matrix) - 1:
+            break
+
+        if not render_as_ascii and y % 2 != 0:
+            continue
+
+        true_y += 1
+
+        for x, (r, g, b) in enumerate(row):
             # Normalize RGB values to 0-1
             norm_r, norm_g, norm_b = r / 255.0, g / 255.0, b / 255.0
 
+            char = '▀'
+            if render_as_ascii:
+                # Calculate brightness (luminance) and normalize to 0-1
+                brightness = (0.299 * norm_r + 0.587 * norm_g + 0.114 * norm_b)
+                char = get_closest_char(brightness, percentages, chars)
+
+            pixel = data.Pixel(char=char, color=data.Color(norm_r, norm_g, norm_b), position=data.Position(x, true_y))
+
+            background_color = color_matrix[y + 1][x]
+
             if not render_as_ascii:
-                pixel = data.Pixel(char='█', color=data.Color(norm_r, norm_g, norm_b), position=data.Position(x, y))
-            else:
-                pixel = data.Pixel(char=char, color=data.Color(norm_r, norm_g, norm_b), position=data.Position(x, y))
+                norm_br, norm_bg, norm_bb = background_color[0] / 255.0, background_color[1] / 255.0, background_color[2] / 255.0
+                pixel.color_background = data.Color(norm_br, norm_bg, norm_bb)
             
             buffer.append(pixel)
 

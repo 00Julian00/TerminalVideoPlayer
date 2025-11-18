@@ -20,29 +20,6 @@ def resize_img(image: Image.Image, width, height):
     
     return img, img_gry
 
-def get_normalized_brightness_matrix(image: Image.Image) -> list[list[float]]:
-    """
-    Converts a grayscale image to a 2D matrix of normalized brightness values (0-1).
-    
-    Args:
-        image (PIL.Image.Image): The grayscale image to be converted.
-    
-    Returns:
-        list[list[float]]: A 2D list representing the normalized brightness values of the image.
-    """
-    width, height = image.size
-    pixels = image.load()
-    
-    brightness_matrix = []
-    for y in range(height):
-        row = []
-        for x in range(width):
-            brightness = pixels[x, y] / 255.0  # Normalize to 0-1
-            row.append(brightness)
-        brightness_matrix.append(row)
-    
-    return brightness_matrix
-
 def get_rgb_matrix(image: Image.Image) -> list[list[tuple[int, int, int]]]:
     """
     Converts an RGB image to a 2D matrix of RGB tuples.
