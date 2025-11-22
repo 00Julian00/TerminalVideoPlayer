@@ -12,7 +12,7 @@ BLOCK_CHAR = '▀'.encode('utf-8')
 def _video_producer_process(file_path: str, resolution: int, 
                           shm_name: str, buffer_size: int, 
                           free_queue: multiprocessing.Queue, ready_queue: multiprocessing.Queue,
-                          feedback_queue: multiprocessing.Queue, compression: int):
+                          compression: int):
     """
     Standalone function to run in a separate process.
     Decodes video and puts byte sequences into shared memory.
@@ -200,16 +200,21 @@ def _video_producer_process(file_path: str, resolution: int,
             # Wait for feedback from consumer
             # If consumer rendered the frame, we update prev_blocks.
             # If consumer skipped the frame, we keep old prev_blocks, so next diff is calculated against the old state.
-            was_rendered = feedback_queue.get()
-            if was_rendered:
-                prev_blocks = current_prev_blocks
-            # else: prev_blocks remains unchanged (or None if it was first frame)
+            
+            # UPDATE: Removed feedback loop to allow buffering ahead.
+            # We assume sequential playback.
+            prev_blocks = current_prev_blocks
 
     except Exception:
         pass
     finally:
         cap.release()
         ready_queue.put(None) # Signal EOF
+        
+        # Allow time for the queue to flush to the pipe before process exit
+        # This prevents the "premature end" where buffered frames are lost when the process dies
+        time.sleep(0.5)
+        
         shm.close()
 
 class VideoDecoder:
@@ -226,7 +231,7 @@ class VideoDecoder:
         self.cap.release() 
         
         self.ready_queue = None
-        self.feedback_queue = None
+        # self.feedback_queue = None # Removed
         self.producer_process = None
         self.shm = None
 
@@ -245,17 +250,17 @@ class VideoDecoder:
         return 0
 
     def diff_frame_generator(self):
-        # Allocate 64MB per frame buffer to handle full HD redraws without truncation
-        # 1920x1080 / 2 blocks * ~40 bytes/block ~= 40MB. 64MB is safe.
-        BUFFER_SIZE = 64 * 1024 * 1024 
-        NUM_BUFFERS = 4 # Ring buffer size
+        # Allocate 4MB per frame buffer to handle most frames.
+        # Large frames (scene changes) will span multiple chunks.
+        # 4MB * 512 buffers ~= 2GB RAM.
+        BUFFER_SIZE = 4 * 1024 * 1024 
+        NUM_BUFFERS = 512 # Increased buffer depth
         
         # Create shared memory block
         self.shm = shared_memory.SharedMemory(create=True, size=BUFFER_SIZE * NUM_BUFFERS)
         
         free_queue = multiprocessing.Queue()
         self.ready_queue = multiprocessing.Queue()
-        self.feedback_queue = multiprocessing.Queue()
         
         # Initialize free queue with all buffer indices
         for i in range(NUM_BUFFERS):
@@ -265,8 +270,8 @@ class VideoDecoder:
             target=_video_producer_process,
             args=(self.file_path, self.resolution, 
                   self.shm.name, BUFFER_SIZE, 
-                  free_queue, self.ready_queue, self.feedback_queue, self.compression),
-            daemon=True
+                  free_queue, self.ready_queue, self.compression),
+            daemon=False # Changed to False to ensure queue flushes before exit
         )
         self.producer_process.start()
 
@@ -286,14 +291,8 @@ class VideoDecoder:
                 # Return buffer index to the free queue so producer can reuse it
                 free_queue.put(idx)
                 
-                # Yield data and wait for feedback
-                # The consumer calls generator.send(True/False) to indicate if frame was rendered
-                was_rendered = (yield data)
-                
-                if was_rendered is None:
-                    was_rendered = True
-                
-                self.feedback_queue.put(was_rendered)
+                # Yield data
+                yield data
                 
         finally:
             # Cleanup resources

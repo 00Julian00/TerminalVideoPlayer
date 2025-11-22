@@ -36,9 +36,6 @@ def _play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted:
     frame_amount = decoder.get_total_frames()
     frame_time = 1.0 / frame_rate
     
-    # Track start time for wall-clock fallback
-    start_time = time.time()
-    
     # Track pause state to avoid spamming the player
     is_paused = False
 
@@ -51,6 +48,10 @@ def _play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted:
         return
 
     frame_idx = 0
+    
+    # Track start time for wall-clock fallback
+    # Moved here so we don't count the time it took to load the first frame as "lag"
+    start_time = time.time()
 
     try:
         while True:
@@ -73,8 +74,9 @@ def _play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted:
             if audio_pts is not None:
                 drift = video_pts - audio_pts
                 
-                if drift > 0:
+                if drift > 0.005:
                     # Video is faster than audio. Sleep to sync.
+                    # Only sleep if drift is significant to avoid OS sleep granularity issues
                     time.sleep(drift)
                     if is_paused:
                         player.set_pause(False)
@@ -94,8 +96,13 @@ def _play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted:
                 target_time = start_time + (frame_idx * frame_time)
                 current_time = time.time()
                 sleep_time = target_time - current_time
-                if sleep_time > 0:
+                if sleep_time > 0.005:
                     time.sleep(sleep_time)
+                elif sleep_time < -0.2:
+                    # We are behind by more than 200ms. 
+                    # Instead of fast-forwarding to catch up, we reset the timeline.
+                    # This effectively "drops" the time we lost.
+                    start_time = current_time - (frame_idx * frame_time)
 
             if debug_mode and daemon_helper.daemon_manager:
                 frame_end_time = time.time()
@@ -105,7 +112,7 @@ def _play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted:
                     total_frames=frame_amount,
                     frames_buffered=decoder.get_buffered_frame_count(),
                     data_throughput=len(frame) / 1024,
-                    playback_speed= min(1.0 / (frame_end_time - frame_start_time) / frame_rate, 1.0)
+                    playback_speed= 1.0 / (frame_end_time - frame_start_time) / frame_rate
                 )
     finally:
         # Mute immediately to stop any buffered audio from playing
