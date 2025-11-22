@@ -1,14 +1,11 @@
 import argparse
 import cProfile
-import asyncio
 import logging
 import time
 import os
 
 from blessed import Terminal
-
-import pyximport
-pyximport.install()
+from ffpyplayer.player import MediaPlayer
 
 import terminal_api
 import daemon_helper
@@ -19,42 +16,107 @@ terminal = Terminal()
 if os.name == 'nt':
     os.system('chcp 65001 >nul')
 
-def _play_video(file_path: str, size: int = 32, debug_mode: bool = False):
+def _play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted: bool = False, compression: int = 150):
     decoder = video_decoder.VideoDecoder(
         file_path,
-        size
+        size,
+        compression
     )
+    
+    # Initialize audio player
+    # vn=True disables video decoding in the player (audio only)
+    # loglevel='quiet' prevents ffmpeg output from corrupting the terminal
+    player = None
+    if not muted:
+        player = MediaPlayer(file_path, ff_opts={'vn': True, 'sn': True}, loglevel='quiet')
+    
+    total_lost_time = 0.0
 
     diff_generator = decoder.diff_frame_generator()
 
     frame_rate = decoder.get_frame_rate()
     frame_amount = decoder.get_total_frames()
     frame_time = 1.0 / frame_rate
+    
+    # Track start time for wall-clock fallback
+    start_time = time.time()
+    
+    # Track pause state to avoid spamming the player
+    is_paused = False
 
-    for frame_idx, frame in enumerate(diff_generator):
-        frame_start = time.time()
+    # Start the generator
+    try:
+        frame = next(diff_generator)
+    except StopIteration:
+        if player:
+            player.close_player()
+        return
 
-        terminal_api.print_at_bytes((0, 0), frame)
+    frame_idx = 0
 
-        elapsed = time.time() - frame_start
-        sleep_time = max(0, frame_time - elapsed)
+    try:
+        while True:
+            # Render the current frame
+            terminal_api.print_at_bytes((0, 0), frame)
 
-        actual_frame_time = elapsed + sleep_time
-        actual_fps = 1.0 / actual_frame_time if actual_frame_time > 0 else 0.0
-        playback_speed = actual_fps / frame_rate if frame_rate > 0 else 0.0
+            # Get next frame immediately. This includes decoding time.
+            try:
+                frame = diff_generator.send(True)
+                frame_idx += 1
+            except StopIteration:
+                break
 
-        if debug_mode and daemon_helper.daemon_manager:
-            daemon_helper.daemon_manager.update_daemon(
-                frames_shown=frame_idx,
-                total_frames=frame_amount,
-                frames_buffered=decoder.get_buffered_frame_count(),
-                data_throughput=len(frame) / 1024,
-                playback_speed=playback_speed
-            )
-        
-        time.sleep(sleep_time)
+            # Sync Logic
+            video_pts = frame_idx * frame_time
+            audio_pts = player.get_pts() if player else None
 
-def play_video(file_path: str, size: int = 32, debug_mode: bool = False):
+            if audio_pts is not None:
+                # drift = how much video is ahead of audio
+                # positive: video is ahead (wait for audio)
+                # negative: video is behind (audio is ahead)
+                drift = video_pts - audio_pts
+                
+                if drift > 0:
+                    # Video is faster than audio. Sleep to sync.
+                    time.sleep(drift)
+                    if is_paused:
+                        player.set_pause(False)
+                        is_paused = False
+                elif drift < -0.2:
+                    # Video is slower than audio by > 200ms. Pause audio to let video catch up.
+                    if not is_paused:
+                        player.set_pause(True)
+                        is_paused = True
+                else:
+                    # Video is slightly behind or in sync. Ensure audio plays.
+                    if is_paused:
+                        player.set_pause(False)
+                        is_paused = False
+            else:
+                # Fallback: Audio not ready yet or finished. Sync to wall clock.
+                target_time = start_time + (frame_idx * frame_time)
+                current_time = time.time()
+                sleep_time = target_time - current_time
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
+            if debug_mode and daemon_helper.daemon_manager:
+                # Calculate stats
+                daemon_helper.daemon_manager.update_daemon(
+                    frames_shown=frame_idx,
+                    total_frames=frame_amount,
+                    frames_buffered=decoder.get_buffered_frame_count(),
+                    data_throughput=len(frame) / 1024,
+                    playback_speed=1.0 
+                )
+    finally:
+        # Mute immediately to stop any buffered audio from playing
+        if player:
+            player.set_volume(0.0)
+            player.set_pause(True)
+            player.close_player()
+
+def play_video(file_path: str, size: int = 32, debug_mode: bool = False, muted: bool = False, compression: int = 150):
     terminal_api.clear_screen(terminal)
     terminal_api.hide_cursor()
     
@@ -64,7 +126,7 @@ def play_video(file_path: str, size: int = 32, debug_mode: bool = False):
         logging.getLogger().setLevel(logging.ERROR)
     
     try:    
-        _play_video(file_path, size, debug_mode)
+        _play_video(file_path, size, debug_mode, muted, compression)
 
     except KeyboardInterrupt:
         pass
@@ -87,9 +149,11 @@ if __name__ == "__main__":
     parser.add_argument("file_path", help="The path to the video file.")
     parser.add_argument("--size", type=int, default=32, help="The size of the video element.")
     parser.add_argument("--debug", action="store_true", help="Open debug terminal and run with profiler.")
+    parser.add_argument("--muted", action="store_true", help="Mute the audio.")
+    parser.add_argument("--compression", type=int, default=150, help="The threshold for color change detection (default: 150).")
     args = parser.parse_args()
 
     if args.debug:
-        cProfile.run('play_video(args.file_path, args.size, args.debug)')
+        cProfile.run('play_video(args.file_path, args.size, args.debug, args.muted, args.compression)')
     else:
-        play_video(args.file_path, args.size, args.debug)
+        play_video(args.file_path, args.size, args.debug, args.muted, args.compression)

@@ -4,14 +4,15 @@ import multiprocessing
 from multiprocessing import shared_memory
 import time
 from terminal_api import get_move_sequence_bytes
-from constants import PERCEPTUAL_WEIGHT_BLUE, PERCEPTUAL_WEIGHT_GREEN, PERCEPTUAL_WEIGHT_RED, COLOR_CHANGE_THRESHOLD
+from constants import PERCEPTUAL_WEIGHT_BLUE, PERCEPTUAL_WEIGHT_GREEN, PERCEPTUAL_WEIGHT_RED
 
 # Pre-encode the block character to avoid doing it millions of times
 BLOCK_CHAR = '▀'.encode('utf-8')
 
 def _video_producer_process(file_path: str, resolution: int, 
                           shm_name: str, buffer_size: int, 
-                          free_queue: multiprocessing.Queue, ready_queue: multiprocessing.Queue):
+                          free_queue: multiprocessing.Queue, ready_queue: multiprocessing.Queue,
+                          feedback_queue: multiprocessing.Queue, compression: int):
     """
     Standalone function to run in a separate process.
     Decodes video and puts byte sequences into shared memory.
@@ -65,20 +66,23 @@ def _video_producer_process(file_path: str, resolution: int,
             # Cast to int16 immediately to avoid repeated casting during diff and allow negative subtraction
             blocks = frame.reshape(h // 2, 2, w, c).astype(np.int16)
 
+            current_prev_blocks = None
+            change_mask = None
+
             if prev_blocks is None:
                 # Force full redraw for the first frame
                 change_mask = np.ones((h // 2, w), dtype=bool)
-                prev_blocks = blocks.copy()
+                current_prev_blocks = blocks.copy()
             else:
                 # Weighted Euclidean-ish Distance (Manhattan on weighted channels)
                 diff_vals = np.abs(blocks - prev_blocks)
                 weighted_diff = diff_vals * perceptual_weights
                 diff_score = np.sum(weighted_diff, axis=(1, 3))
                 
-                change_mask = diff_score > COLOR_CHANGE_THRESHOLD
+                change_mask = diff_score > compression
 
-                # Update the 'prev_blocks' state only for pixels that changed
-                prev_blocks = np.where(change_mask[:, None, :, None], blocks, prev_blocks)
+                # Calculate what the new state WOULD be, but don't commit to prev_blocks yet
+                current_prev_blocks = np.where(change_mask[:, None, :, None], blocks, prev_blocks)
 
             rows, cols = np.where(change_mask)
 
@@ -192,6 +196,14 @@ def _video_producer_process(file_path: str, resolution: int,
                 # If total_len was 0 (empty frame), we sent one empty update and break
                 if total_len == 0:
                     break
+            
+            # Wait for feedback from consumer
+            # If consumer rendered the frame, we update prev_blocks.
+            # If consumer skipped the frame, we keep old prev_blocks, so next diff is calculated against the old state.
+            was_rendered = feedback_queue.get()
+            if was_rendered:
+                prev_blocks = current_prev_blocks
+            # else: prev_blocks remains unchanged (or None if it was first frame)
 
     except Exception:
         pass
@@ -201,9 +213,10 @@ def _video_producer_process(file_path: str, resolution: int,
         shm.close()
 
 class VideoDecoder:
-    def __init__(self, file_path: str, resolution: int):
+    def __init__(self, file_path: str, resolution: int, compression: int = 150):
         self.file_path = file_path
         self.resolution = resolution if resolution % 2 == 0 else resolution + 1
+        self.compression = compression
         
         # Open briefly to get metadata, then release.
         # The worker process will open its own handle.
@@ -213,6 +226,7 @@ class VideoDecoder:
         self.cap.release() 
         
         self.ready_queue = None
+        self.feedback_queue = None
         self.producer_process = None
         self.shm = None
 
@@ -241,6 +255,7 @@ class VideoDecoder:
         
         free_queue = multiprocessing.Queue()
         self.ready_queue = multiprocessing.Queue()
+        self.feedback_queue = multiprocessing.Queue()
         
         # Initialize free queue with all buffer indices
         for i in range(NUM_BUFFERS):
@@ -250,7 +265,7 @@ class VideoDecoder:
             target=_video_producer_process,
             args=(self.file_path, self.resolution, 
                   self.shm.name, BUFFER_SIZE, 
-                  free_queue, self.ready_queue),
+                  free_queue, self.ready_queue, self.feedback_queue, self.compression),
             daemon=True
         )
         self.producer_process.start()
@@ -271,12 +286,22 @@ class VideoDecoder:
                 # Return buffer index to the free queue so producer can reuse it
                 free_queue.put(idx)
                 
-                yield data
+                # Yield data and wait for feedback
+                # The consumer calls generator.send(True/False) to indicate if frame was rendered
+                was_rendered = (yield data)
+                
+                if was_rendered is None:
+                    was_rendered = True
+                
+                self.feedback_queue.put(was_rendered)
+                
         finally:
             # Cleanup resources
             if self.producer_process.is_alive():
                 # Send sentinel to unblock producer if it's waiting
                 free_queue.put(None)
+                # Also unblock feedback wait if necessary
+                # (Though usually producer dies on queue close or sentinel)
                 self.producer_process.join(timeout=1.0)
                 if self.producer_process.is_alive():
                     self.producer_process.terminate()

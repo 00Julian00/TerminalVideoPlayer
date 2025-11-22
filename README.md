@@ -15,9 +15,19 @@ python main.py /path/to/your/video.mp4
 
 ### Options
 
-- **Size**: Adjust the size of the video element. The default is 32.
+- **Size**: Adjust the size of the video element. Defaults to 32.
   ```bash
   python main.py /path/to/your/video.mp4 --size 64
+  ```
+
+- **Mute Audio**: Mute the audio playback.
+  ```bash
+  python main.py /path/to/your/video.mp4 --muted
+  ```
+
+- **Video Compression**: How much the colors are compressed in the video playback. Improves playback performance but degrades video quality. Defaults to 150.
+  ```bash
+  python main.py /path/to/your/video.mp4 --compression 100
   ```
 
 - **Debug Mode**: Opens a second terminal that shows debug information and runs the program with the profiler enabled.
